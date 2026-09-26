@@ -41,8 +41,6 @@ export interface EntityCacheSource<Row extends RowShape, Key> {
   table: RowTable<Row>;
   /** The column values that pick out a partition's rows. */
   filter: (key: Key) => Partial<Row>;
-  /** Makes the calling read depend on the whole partition, for a lookup whose entities any write can change. */
-  trackPartition: (key: Key) => void;
 }
 
 /**
@@ -63,7 +61,7 @@ export function bindCaches<Key, Row extends RowShape, D extends Record<string, C
       if (!source) throw new Error(`[${store}] '${name}' is a byEntity cache, which reads a store's rows; declare it in the store's partitions.defineCaches block`);
       const memo = createMemos(store, binding, { [name]: derivedValueMemo(decl.def.max) })[name] as DerivedValueMemo<Key, unknown>;
       out[name] = createDerivedValues<Row, Key, unknown>(
-        { store, name, table: source.table, filter: source.filter, memo, trackPartition: source.trackPartition },
+        { store, name, table: source.table, filter: source.filter, memo, parts: binding.parts, version: binding.version },
         decl.def as EntityCacheDeclaration<Row, unknown>['def'],
       );
     } else {

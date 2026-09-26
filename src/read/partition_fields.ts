@@ -6,7 +6,7 @@ import type { CommonDef } from './surface';
 /** Args fields that can name a partition: every field of a partition key is one string. */
 export type PartitionField<Args> = { [K in keyof Args]: Args[K] extends string ? K : never }[keyof Args];
 
-/** Args fields a read can vary by: anything that can go into a cache key. */
+/** Args fields a read can vary by: anything that can go into a key. */
 export type VaryField<Args> = { [K in keyof Args]: Args[K] extends VaryValue ? K : never }[keyof Args];
 
 /**

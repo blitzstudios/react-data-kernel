@@ -4,9 +4,9 @@
  *
  * A read names a partition with its args (a partition is the set of rows one fetch returns and replaces), fetches the
  * partition if it has never been fetched, and runs the read's {@linkcode ReadDef.select | select} over the partition's
- * rows to compute its value. The value is cached by partition and args, shared by every caller with the same ones, and
- * recomputed only when rows it depended on change; the hook re-renders its component only when the recomputed value
- * differs.
+ * rows to compute its value. A read caches nothing itself: {@linkcode ReadDef.select | select} returns values from the
+ * store's caches (declared in {@linkcode Partitions.defineCaches | defineCaches}), the hook runs it again only when
+ * something it read changes, and re-renders its component only when the new value differs.
  */
 import { VaryValue } from '../args_key';
 import { PartitionField, VaryField } from './partition_fields';
@@ -80,10 +80,10 @@ export type VarySpec<Args> = readonly VaryField<Args>[] | ((args: Args) => reado
  * The args a read's {@linkcode ReadDef.select | select} receives: only the fields its
  * {@linkcode CommonDef.varyBy | varyBy} lists, each typed as non-null, since {@linkcode ReadDef.select | select} only
  * runs once all of them have values. Reading any other arg in {@linkcode ReadDef.select | select} is a type error,
- * because the read's cached value is shared by every caller whose partition and {@linkcode CommonDef.varyBy | varyBy}
- * values match; a value computed from an unlisted arg would be served to callers that passed a different one. A read
- * whose {@linkcode CommonDef.varyBy | varyBy} is a function lists no fields, so its {@linkcode ReadDef.select | select}
- * receives the whole args.
+ * because a hook runs {@linkcode ReadDef.select | select} again only when its partition or its
+ * {@linkcode CommonDef.varyBy | varyBy} values change; a value computed from an unlisted arg would go stale when that
+ * arg changed. A read whose {@linkcode CommonDef.varyBy | varyBy} is a function lists no fields, so its
+ * {@linkcode ReadDef.select | select} receives the whole args.
  */
 export type SelectArgs<Args, V> = V extends readonly (keyof Args)[] ? {
     [K in V[number]]: NonNullable<Args[K & keyof Args]>;
@@ -106,13 +106,13 @@ export interface CommonDef<Args, T, V extends VarySpec<Args>> {
      * read of one player out of a league's partition. Either a list of args field names, or a function computing values
      * from the args.
      *
-     * These values, with the partition, are the read's cache key: every caller with the same partition and the same
-     * values shares one cached value. So list every arg {@linkcode ReadDef.select | select} uses;
-     * {@linkcode ReadDef.select | select} can only see the listed ones (a type error otherwise). While any of them is
+     * These values, with the partition, are what a hook runs {@linkcode ReadDef.select | select} again for when they
+     * change. So list every arg {@linkcode ReadDef.select | select} uses; {@linkcode ReadDef.select | select} can only see
+     * the listed ones (a type error otherwise). While any of them is
      * missing (`undefined`, `null`, `''` or an empty array; `0` and `false` count as values), the read returns
      * {@linkcode CommonDef.empty | empty} without running {@linkcode ReadDef.select | select}, but still fetches the
      * partition, so the rows are there when the value arrives. Arrays and objects are compared by content, so a caller
-     * that rebuilds one each render still hits the cache.
+     * that rebuilds one each render doesn't run {@linkcode ReadDef.select | select} again.
      */
     varyBy?: V;
     /**
@@ -135,12 +135,6 @@ export interface CommonDef<Args, T, V extends VarySpec<Args>> {
      * {@linkcode shallowEqualStruct} when equality depends on a level deeper.
      */
     isEqual?: (left: T, right: T) => boolean;
-    /**
-     * How many values the read caches: one per combination of partition and {@linkcode CommonDef.varyBy | varyBy} values,
-     * shared by every caller. 256 by default. When a screen asks for more combinations than this, older ones are
-     * recomputed when asked again.
-     */
-    getCacheMax?: number;
     /**
      * Whether reading a partition that has never been fetched fetches it; true by default. Set false for a read that
      * should only use rows something else fetched, such as one that looks in partitions a value might be in without
@@ -171,10 +165,11 @@ export interface ReadDef<Args, Key, T, V extends VarySpec<Args> = readonly []> e
      * and every {@linkcode CommonDef.varyBy | varyBy} value is present; otherwise the read returns
      * {@linkcode CommonDef.empty | empty}.
      *
-     * The result is cached until the rows it depended on change. If {@linkcode ReadDef.select | select} reads through
-     * a {@linkcode byEntity} cache, it depends on just the entities (such as the players) it read, and a write to other
-     * entities doesn't recompute it. If it reads the table directly, it depends on the whole partition and is recomputed
-     * after any write to it.
+     * The read doesn't cache the result: a hook runs {@linkcode ReadDef.select | select} again when something it read
+     * changes, and {@linkcode Read.getValue | getValue} runs it on every call. So it should return values from the
+     * store's caches, and build anything expensive inside one. If it reads through a {@linkcode byEntity} cache, it
+     * depends on just the entities (such as the players) it read, and a write to other entities doesn't re-run it. If it
+     * reads the table directly, it depends on the whole partition and runs again after any write to it.
      */
     select: (args: SelectArgs<Args, V>, key: Key) => T;
 }
@@ -272,7 +267,7 @@ export declare function useResult<T>(data: T, status: DataStatus, isFetching: bo
  * Builds the read engine over one store's partitions: {@linkcode Partitions.defineRead | defineRead} /
  * {@linkcode Partitions.defineReadMany | defineReadMany} / {@linkcode Partitions.defineReadGrouped | defineReadGrouped}
  * each take a descriptor and hand back its {@linkcode Read.useValue | useValue} / {@linkcode Read.getValue | getValue}
- * pair, with the priming, the version subscription, the presence gate and the value cache already wrapped around
+ * pair, with the priming, the version subscription and the presence gate already wrapped around
  * {@linkcode ReadDef.select | select}. {@linkcode definePartitions} builds one per store, so stores declare reads.
  */
 export declare function createReadSurface<Key>(kernel: ReadSurfaceKernel<Key>): {

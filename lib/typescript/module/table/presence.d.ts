@@ -4,7 +4,7 @@
  */
 import { RowShape } from './types';
 import type { RowTable } from './types';
-/** Identifies a row filter as a `Map` key, here and for the ETag cache; a read's cache key comes from `args_key`. */
+/** Identifies a row filter as a `Map` key, here and for the ETag cache; a read's key comes from `args_key`. */
 export declare function whereMapKey(where: Partial<RowShape>): string;
 /**
  * The memo behind a row table's {@linkcode RowTable.has | has}: {@linkcode Presence.get | get} and

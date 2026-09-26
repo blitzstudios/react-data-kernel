@@ -167,12 +167,14 @@ store is reaching past its entry point; import it from its own module only if yo
   declares no partition at all, which is the common case.
   Give it explicitly only for an address one read computes differently from its siblings. `readMany` always names
   its own `partitions`, since the set is the read's. `varyBy` is everything else `select` reads — named as args
-  fields (`varyBy: ['itemId']`) or computed — and it is both the read's cache key and its gate: the read is off
-  while any of those values is absent.
+  fields (`varyBy: ['itemId']`) or computed — and it is both what a hook runs `select` again for and the read's gate:
+  the read is off while any of those values is absent. A read caches nothing itself. A hook runs `select` when what it
+  read changes and keeps its last object while the new value is equal; `getValue` runs `select` on every call. So
+  `select` returns values out of the store's caches, and whatever it builds that costs anything, it builds inside one.
 
   Prefer the field names, which is the form that carries its own guarantee: `select` is handed those fields and
   nothing else, each non-null, so a cast at the call is unnecessary and reaching an arg the read never declared —
-  the mistake that would serve one caller's value to the next — does not compile. A computed `varyBy` names no
+  the mistake that would leave a hook's value stale when that arg changed — does not compile. A computed `varyBy` names no
   fields to narrow to, so such a read is handed the whole args and answers for them itself;
   `no_undeclared_select_arg`, a lint rule in the consuming app, is what holds it to the same rule.
 
@@ -184,7 +186,7 @@ store is reaching past its entry point; import it from its own module only if yo
   over an empty value. Cellar takes the fetch half as one value: the priming hooks and the refetch that goes
   with them are supplied together or not at all.
 - **`partitions.defineCaches`** — every value a store keeps on the heap beyond its rows, in one block, and the only way
-  it builds one:
+  it caches one:
 
   ```ts
   const { gamesByTeam, summaryMap } = partitions.defineCaches({
@@ -210,16 +212,20 @@ store is reaching past its entry point; import it from its own module only if yo
   them. A lookup (`at`, `atEach`, `pick`) depends on the entities it names, so a write to other entities neither
   rebuilds their values nor re-runs the read; `where` and `all` depend on the partition. Every miss in one `atEach` or
   `pick` is built from one query. Underneath, the values sit in an entity memo (`entityMemo` in `caches.ts`), keyed by
-  entity and, where a filter can cut an entity's rows, by the filter.
+  entity and, where a filter can cut an entity's rows, by the filter. Its lists are cached too, in a bounded map of the
+  last 64 it answered: each method hands back the list it gave last time for the same ids or filter when that list
+  holds the same values, and `where` and `all` keep which entities matched until the partition's version moves, so a
+  repeat runs no query.
 - **`byPartition`** — a cache dropped by every write to its partition, with optional content-stable reference reuse: on
   a bump that didn't change an entry, hand back the _same reference_ so downstream shallow-equal bails.
   `read(…parts, compute)` is the whole cache in one call; `peek`/`set` are its batched half, for a caller that
   gathers its misses and computes them in one round-trip.
 
-  Reach for it when **several reads** derive the same value from a partition's rows, or when **one read consults it
-  per item**. Both mean the key is not the read's key, which is the whole test: the read surface already memoizes
-  `select` per `(partition + varyBy, version)`, so a cache one read owns, keyed as that read is keyed, is the same
-  cache twice at two sizes — the pair performs as whichever is smaller. Reach for `getCacheMax` instead.
+  Reach for it for whatever a `select` builds that is expensive and asked for again: a value **several reads** derive
+  from a partition's rows, one **a read consults per item**, or **one read's own result** when building it runs a
+  query or a ranking. A read keeps nothing between calls, so without one, every subscriber and every `getValue` call
+  builds it again. What a `select` assembles cheaply out of cached values, such as a map over a `byEntity` list, needs
+  no cache of its own.
 - **`offHeapStatus`** — the loading-status rule (`loading` while a cold fetch is in flight, else `success`).
   The engine calls this for you; bespoke batch reads call it directly.
 - **`shallowEqualValue`, `shallowEqualRecord`, `shallowEqualArray`, `shallowEqualStruct`** — the `isEqual` family. A

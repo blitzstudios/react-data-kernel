@@ -10,6 +10,10 @@
  * particular entities ({@linkcode DerivedValues.at | at}, {@linkcode DerivedValues.atEach | atEach}) depends on just
  * those entities, so a write to other entities doesn't re-run it. A store declares one set of derived values per shape,
  * and every read of that shape shares it, so each entity's value is built once however many reads ask for it.
+ *
+ * Every method's answer is cached, lists included: asked again, a method returns the same array or object for as long
+ * as what it holds is unchanged, and {@linkcode DerivedValues.where | where} and {@linkcode DerivedValues.all | all}
+ * keep which entities matched until the partition changes, so asking again runs no query.
  */
 import { BoundEntityMemo, Memo, MemoDeclaration } from '../caches';
 import { RowShape, RowTable } from '../table/types';
@@ -64,24 +68,28 @@ export interface DerivedValues<Key, Row extends RowShape, V> {
     at(key: Key, id: string): V | undefined;
     /**
      * The values at each of `ids` (entity ids), in the order of `ids`; an id with no rows in the partition is left out.
-     * Builds every missing one with a single query. A read that calls it depends on those entities only.
+     * Builds every missing one with a single query. A read that calls it depends on those entities only. Asked again for
+     * the same ids, it returns the same array while none of their values has changed.
      */
     atEach(key: Key, ids: readonly string[]): V[];
     /**
      * The same values as {@linkcode DerivedValues.atEach | atEach}, as an object keyed by id instead of a list, for a
      * caller that looks them up. An id with no rows in the partition is left out. A read that calls it depends on those
-     * entities only.
+     * entities only. Asked again for the same ids, it returns the same object while none of their values has changed.
      */
     pick(key: Key, ids: readonly string[]): Record<string, V>;
     /**
      * The values for every entity that has rows matching `filter` (column values, on top of the partition's), such as
      * `{ team: 'KC' }`, in storage order. Where an entity has several rows, its value is built from just the rows that
      * match. A read that calls it depends on the whole partition, since any write can change which entities match.
+     *
+     * Which entities match is kept until the partition changes, so asking again runs no query; after a write, the query
+     * runs once, and the same array comes back if the matching values are unchanged.
      */
     where(key: Key, filter?: Partial<Row>): V[];
     /**
      * The values for every entity in the partition, in storage order. A read that calls it depends on the whole
-     * partition, since any write can add or remove entities.
+     * partition, since any write can add or remove entities. Kept like {@linkcode DerivedValues.where | where}'s.
      */
     all(key: Key): V[];
 }
@@ -115,7 +123,7 @@ export type DerivedValueMemo<Key, V> = Memo<Key, BoundEntityMemo<V | undefined, 
 export declare function derivedValueMemo<V>(max: number): MemoDeclaration;
 /**
  * What a {@linkcode byEntity} cache needs from the store around it: its name, the rows, how a key addresses them, the
- * memo its values live in, and the partition's version, which a read over the whole partition depends on.
+ * memo its values live in, and the partition's version, which a lookup over the whole partition depends on.
  */
 export interface DerivedValuesContext<Row extends RowShape, Key, V> {
     store: string;
@@ -124,7 +132,10 @@ export interface DerivedValuesContext<Row extends RowShape, Key, V> {
     table: RowTable<Row>;
     filter: (key: Key) => Partial<Row>;
     memo: DerivedValueMemo<Key, V>;
-    trackPartition: (key: Key) => void;
+    /** A partition key's parts, which identify the partition in the lists the cache keeps. */
+    parts: (key: Key) => readonly string[];
+    /** The partition's version. Tracked: the calling read comes to depend on the whole partition. */
+    version: (key: Key) => number;
 }
 export declare function createDerivedValues<Row extends RowShape, Key, V>(ctx: DerivedValuesContext<Row, Key, V>, def: DerivedValuesDef<Row, V>): DerivedValues<Key, Row, V>;
 export type { Partitions, ReadDef, byPartition };

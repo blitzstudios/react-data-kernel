@@ -6,7 +6,7 @@
 import { RowShape } from './types';
 import type { RowTable } from './types';
 
-/** Identifies a row filter as a `Map` key, here and for the ETag cache; a read's cache key comes from `args_key`. */
+/** Identifies a row filter as a `Map` key, here and for the ETag cache; a read's key comes from `args_key`. */
 export function whereMapKey(where: Partial<RowShape>): string {
   return Object.keys(where)
     .sort()

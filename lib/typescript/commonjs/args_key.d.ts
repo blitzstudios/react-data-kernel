@@ -1,4 +1,4 @@
-/** Key derivation for reads: a read's cache key is its partition plus the values it is scoped by. */
+/** Key derivation for reads: a read's key is its partition plus the values it is scoped by. */
 import { cacheKey, cacheKeyOf, KEY_SEP } from './key';
 import type { CommonDef, ReadDef } from './read/surface';
 import type { Partitions } from './define_partitions';
@@ -31,9 +31,9 @@ export declare function partitionLabel(parts: readonly string[]): string;
 /** `undefined`, `null`, `''` and an empty array count as absent; `0` and `false` count as present. */
 export declare function isVaryPresent(value: VaryValue): boolean;
 /**
- * A read's own cache key: its partition, then everything it varies by, so two calls share a memoized value only when
- * the partition and every vary value match. Vary values go through {@linkcode stableKey}, so an object or array arg
- * keys by its content and a caller rebuilding one per render still hits.
+ * A read's key: its partition, then everything it varies by, which a hook runs its select again for when it changes.
+ * Vary values go through {@linkcode stableKey}, so an object or array arg keys by its content and a caller rebuilding
+ * one per render doesn't count as a change.
  */
 export declare function varyKey(parts: readonly string[], vary: readonly VaryValue[]): string;
 export type { CommonDef, Partitions, ReadDef };

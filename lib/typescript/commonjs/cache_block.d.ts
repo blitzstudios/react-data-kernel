@@ -36,8 +36,6 @@ export interface EntityCacheSource<Row extends RowShape, Key> {
     table: RowTable<Row>;
     /** The column values that pick out a partition's rows. */
     filter: (key: Key) => Partial<Row>;
-    /** Makes the calling read depend on the whole partition, for a lookup whose entities any write can change. */
-    trackPartition: (key: Key) => void;
 }
 /**
  * Attaches a cache block to a store: each {@linkcode byPartition} entry to the partitions' versions, and each

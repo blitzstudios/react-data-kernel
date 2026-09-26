@@ -16,7 +16,6 @@
 
 import { identityOf, KEY_SEP, cacheKeyOf } from './args_key';
 import { reportStoreDegradation } from './diagnostics/telemetry';
-import { Dep, runTracked, trackDependency } from './reactivity/tracking';
 import { covered } from './table/read_coverage';
 import type { CommonDef, ReadDef } from './read/surface';
 import type { Partitions } from './define_partitions';
@@ -222,49 +221,6 @@ export function createVersionedCache<V>(maxEntries: number, isEqual?: (prev: V, 
 }
 
 /**
- * A cache whose entries each remember exactly what their computation read (the partition, entity and presence versions
- * it looked at) and stay valid until one of those changes. It is how reads cache their values: a read of three players
- * keeps its value through a write that changed a fourth. Every lookup, hit or miss, reports the entry's dependencies to
- * the caller's tracking scope, so a component reading a cached value is subscribed to the same things as one that
- * computed it.
- */
-export interface TrackedCache<V> {
-  /**
-   * The value stored for `key`, if nothing it read has changed since it was computed. Otherwise runs `compute`,
-   * records what it read, stores the result, and returns it (or the previous object, if `isEqual` finds them equal).
-   */
-  read(key: string, compute: () => V): V;
-}
-
-interface TrackedEntry<V> {
-  value: V;
-  deps: readonly Dep[];
-  versions: readonly number[];
-}
-
-/**
- * Creates a {@linkcode TrackedCache} holding at most `maxEntries` values, removing the least recently used to make
- * room. `isEqual` compares a recomputed value with the previous one, and keeps the previous object when they're equal.
- */
-export function createTrackedCache<V>(maxEntries: number, isEqual?: (prev: V, next: V) => boolean): TrackedCache<V> {
-  const lru = createBoundedLru<TrackedEntry<V>>(maxEntries);
-  return {
-    read(key, compute) {
-      const hit = lru.get(key);
-      if (hit && hit.deps.every((dep, index) => dep.getVersion() === hit.versions[index])) {
-        for (const dep of hit.deps) trackDependency(dep);
-        return hit.value;
-      }
-      const { value, deps } = runTracked(compute);
-      const kept = hit && isEqual && isEqual(hit.value, value) ? hit.value : value;
-      lru.set(key, { value: kept, deps, versions: deps.map((dep) => dep.getVersion()) });
-      for (const dep of deps) trackDependency(dep);
-      return kept;
-    },
-  };
-}
-
-/**
  * One part of a cache entry's key, beyond the partition (and entity): a string, number, boolean, null or undefined, or
  * an object or array, such as a scoring config. Objects and arrays are compared by content, and each distinct content
  * is replaced in the key by a short id, so a large object doesn't make every key long.
@@ -410,8 +366,9 @@ function splitArgs<T>(args: readonly unknown[]): { parts: readonly CacheKeyPart[
  * entry counts as missing after any write that changes its partition, and the value is computed again at the next
  * lookup, by the `build` that lookup passes. A read that uses it depends on the whole partition.
  *
- * Use it for a value several reads share, or one a read looks up once per item in a list. A cache keyed exactly like a
- * single read adds nothing, since the read already caches its own value.
+ * Use it for whatever a read's {@linkcode ReadDef.select | select} builds that is expensive and asked for again: a value
+ * several reads share, one a read looks up once per item in a list, or one read's own result when building it runs a
+ * query. A read caches nothing itself, so without a cache, every subscriber and every call builds it again.
  *
  * The first type argument is the value; one value per partition is `byPartition<Map<string, Player[]>>({ max: 8 })`.
  * For values keyed by more than the partition, the second lists the key's other parts, named, in the order a lookup

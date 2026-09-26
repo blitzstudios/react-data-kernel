@@ -580,7 +580,7 @@ export function definePartitions<Row extends RowShape, Key, Args = Key, Descript
     defineRead: surface.read,
     defineReadMany: readManyOf,
     defineReadGrouped: readGroupedOf,
-    defineCaches: (decls) => bindCaches(name, memoBinding, decls, { table, filter: where, trackPartition: versionOf }),
+    defineCaches: (decls) => bindCaches(name, memoBinding, decls, { table, filter: where }),
     where,
     keyOf,
     internedKeys: () => (interned ? (interned.keys() as IterableIterator<Key>) : NO_INTERNED[Symbol.iterator]()),

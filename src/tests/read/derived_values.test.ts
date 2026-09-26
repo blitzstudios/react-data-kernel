@@ -67,6 +67,54 @@ function harness(over: { table?: RowTable<PlayerRow>; max?: number; fromRows?: (
 
 const idsOf = (deps: readonly { id: string }[]): string[] => deps.map((dep) => dep.id);
 
+describe('derived values — every answer is cached, lists included', () => {
+  it('hands back the same list for the same ids until one of their values changes', () => {
+    const { derived, seed } = harness();
+    seed([player('p1', 'Alice'), player('p2', 'Bob'), player('p3', 'Cal')]);
+
+    const list = derived.atEach(NFL, ['p1', 'p2']);
+    const map = derived.pick(NFL, ['p1', 'p2']);
+    expect(derived.atEach(NFL, ['p1', 'p2'])).toBe(list);
+    expect(derived.pick(NFL, ['p1', 'p2'])).toBe(map);
+
+    seed([player('p1', 'Alice'), player('p2', 'Bob'), player('p3', 'Cy')]);
+    expect(derived.atEach(NFL, ['p1', 'p2'])).toBe(list);
+    expect(derived.pick(NFL, ['p1', 'p2'])).toBe(map);
+
+    seed([player('p1', 'Alicia'), player('p2', 'Bob'), player('p3', 'Cy')]);
+    expect(derived.atEach(NFL, ['p1', 'p2'])).not.toBe(list);
+    expect(derived.pick(NFL, ['p1', 'p2'])).not.toBe(map);
+  });
+
+  it('keeps which entities match a filter until the partition changes, and the same list while they hold the same values', () => {
+    const { derived, seed, table } = harness();
+    seed([player('p1', 'Alice', 'NE'), player('p2', 'Bob', 'KC')]);
+    const query = jest.spyOn(table, 'entityIdsWhere');
+
+    const onNe = derived.where(NFL, { team: 'NE' });
+    expect(derived.where(NFL, { team: 'NE' })).toBe(onNe);
+    expect(query).toHaveBeenCalledTimes(1);
+
+    seed([player('p1', 'Alice', 'NE'), player('p2', 'Bo', 'KC')]);
+    expect(derived.where(NFL, { team: 'NE' })).toBe(onNe);
+    expect(query).toHaveBeenCalledTimes(2);
+
+    seed([player('p1', 'Alice', 'NE'), player('p2', 'Bo', 'NE')]);
+    expect(derived.where(NFL, { team: 'NE' }).map((vm) => vm.label)).toEqual(['Alice', 'Bo']);
+  });
+
+  it('keeps the whole partition like a filter', () => {
+    const { derived, seed, table } = harness();
+    seed([player('p1', 'Alice'), player('p2', 'Bob')]);
+    const query = jest.spyOn(table, 'entityIdsWhere');
+
+    const all = derived.all(NFL);
+    expect(derived.all(NFL)).toBe(all);
+    expect(derived.where(NFL)).toBe(all);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('derived values — a write rebuilds only the entities it changed', () => {
   it('builds one view model per entity, and answers a repeat without rebuilding', () => {
     const { derived, fromRows, seed } = harness();

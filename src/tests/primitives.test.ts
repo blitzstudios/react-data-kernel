@@ -2,7 +2,6 @@ import {
   byPartition,
   createBoundedLru,
   createMemos,
-  createTrackedCache,
   createVersionedCache,
   PartitionBinding,
   shallowEqualArray,
@@ -208,53 +207,6 @@ describe('createBoundedLru', () => {
     expect(lru.get('a')).toBe(10);
     expect([...lru.keys()]).toEqual(['b', 'a']);
     expect(evicted).toEqual([]);
-  });
-});
-
-describe('createTrackedCache', () => {
-  it('holds a value while nothing its computation read has changed, and recomputes once something has', () => {
-    const atom = createVersionAtom('tracked_cache_test');
-    // A partition's first write counts as every entity changed, so the partition starts written.
-    atom.bump(['us']);
-    const cache = createTrackedCache<number>(8);
-    let computed = 0;
-    const compute = () => {
-      computed += 1;
-      atom.getEntity(['us'], 'p1');
-      return computed;
-    };
-
-    expect(cache.read('k', compute)).toBe(1);
-    expect(cache.read('k', compute)).toBe(1);
-    atom.bump(['us'], new Set(['p2']));
-    expect(cache.read('k', compute)).toBe(1);
-    atom.bump(['us'], new Set(['p1']));
-    expect(cache.read('k', compute)).toBe(2);
-  });
-
-  it('reports what the value depends on to the scope above it, on a hit as much as on a miss', () => {
-    const atom = createVersionAtom('tracked_cache_test');
-    const cache = createTrackedCache<number>(8);
-    const compute = () => atom.getEntity(['us'], 'p1');
-
-    const miss = runTracked(() => cache.read('k', compute)).deps.map((dep) => dep.id);
-    const hit = runTracked(() => cache.read('k', compute)).deps.map((dep) => dep.id);
-
-    expect(miss).toHaveLength(1);
-    expect(hit).toEqual(miss);
-  });
-
-  it('keeps the prior reference when a recompute turned out equal', () => {
-    const atom = createVersionAtom('tracked_cache_test');
-    const cache = createTrackedCache<{ n: number }>(8, (left, right) => left.n === right.n);
-    const compute = () => {
-      atom.get(['us']);
-      return { n: 1 };
-    };
-
-    const first = cache.read('k', compute);
-    atom.bump(['us']);
-    expect(cache.read('k', compute)).toBe(first);
   });
 });
 

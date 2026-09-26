@@ -4,7 +4,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { createReadSurface, ReadDef, ReadSurfaceKernel } from '../../read/surface';
 import { VaryValue } from '../../args_key';
 import { createVersionAtom } from '../../reactivity/version_atom';
-import { shallowEqualRecord } from '../../caches';
+import { createVersionedCache, shallowEqualRecord } from '../../caches';
 import { runTracked } from '../../reactivity/tracking';
 
 /* global globalThis */
@@ -119,7 +119,7 @@ describe('createReadSurface — getValue reports what it depends on to the track
   const partition = (key: string) => `read_surface_test_version\u0000${key}`;
   const presence = (key: string) => `${partition(key)}\u0001\u0001`;
 
-  it('on a cache hit as on a miss: presence, and the partition, since this select reads rows off the table itself', () => {
+  it('on every call: presence, and the partition, since this select reads rows off the table itself', () => {
     const harness = makeHarness();
     const read = harness.read(harness.sliceDef);
     harness.land('p1', { a: { score: 1 } });
@@ -193,17 +193,21 @@ describe('createReadSurface — the two halves of a read', () => {
     probe.unmount();
   });
 
-  it('costs one select per bump no matter how many subscribers share the args', () => {
+  it('caches nothing itself: each subscriber runs select, so work they share belongs in a cache select reads', () => {
     const harness = makeHarness();
-    const select = jest.fn(harness.sliceDef.select);
+    const cache = createVersionedCache<Slice>(8);
+    const build = jest.fn((key: string): Slice => ({ ...(harness.slices.get(key) ?? harness.EMPTY) }));
+    const select = jest.fn((_args: unknown, key: string) => cache.read(key, harness.atom.get([key]), () => build(key)));
     const read = harness.surface.read<{ key: string }, Slice>()({ ...harness.sliceDef, select });
     harness.land('p1', { a: { score: 1 } });
 
     const probes = [renderHook(() => read.useValue({ key: 'p1' })), renderHook(() => read.useValue({ key: 'p1' }))];
     select.mockClear();
+    build.mockClear();
     harness.land('p1', { a: { score: 2 } });
 
-    expect(select).toHaveBeenCalledTimes(1);
+    expect(select.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(build).toHaveBeenCalledTimes(1);
     expect(probes[0].current.data).toBe(probes[1].current.data);
     expect(read.getValue({ key: 'p1' })).toBe(probes[0].current.data);
     probes.forEach((probe) => probe.unmount());
@@ -399,29 +403,19 @@ describe('createReadSurface — get (imperative)', () => {
     expect(harness.spies.ensure).toEqual([]);
   });
 
-  it('is reference-stable per version and recomputes after a bump', () => {
+  it('runs select on every call and returns what it returns, so its object is only as stable as select makes it', () => {
     const harness = makeHarness();
-    const read = harness.read(harness.sliceDef);
-    const scoreRow = { score: 1 };
-    harness.land('p1', { a: scoreRow });
+    const select = jest.fn(harness.sliceDef.select);
+    const read = harness.read({ ...harness.sliceDef, select });
+    const slice = { a: { score: 1 } };
+    harness.land('p1', slice);
 
-    const first = read.getValue({ key: 'p1' });
-    expect(first).toEqual({ a: scoreRow });
-    expect(read.getValue({ key: 'p1' })).toBe(first);
+    expect(read.getValue({ key: 'p1' })).toBe(slice);
+    expect(read.getValue({ key: 'p1' })).toBe(slice);
+    expect(select).toHaveBeenCalledTimes(2);
 
-    harness.slices.set('p1', { a: scoreRow });
-    act(() => {
-      harness.atom.bump(['p1']);
-    });
-    expect(read.getValue({ key: 'p1' })).toBe(first);
-
-    harness.slices.set('p1', { a: { score: 2 } });
-    act(() => {
-      harness.atom.bump(['p1']);
-    });
-    const changed = read.getValue({ key: 'p1' });
-    expect(changed).not.toBe(first);
-    expect(changed.a.score).toBe(2);
+    harness.land('p1', { a: { score: 2 } });
+    expect(read.getValue({ key: 'p1' }).a.score).toBe(2);
   });
 
   it('discriminates args that share a partition, so a per-entity read never serves another entity', () => {
